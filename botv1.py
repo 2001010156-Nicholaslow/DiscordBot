@@ -2,6 +2,16 @@ import discord
 from discord.ext import commands
 import random
 import os
+import json
+
+# File path for storing player data change if needed
+PLAYER_DATA_FILE = 'player_data.json'
+
+if os.path.exists(PLAYER_DATA_FILE):
+    with open(PLAYER_DATA_FILE, 'r') as file:
+        player_data = json.load(file)
+else:
+    player_data = []
 
 intents = discord.Intents.default()
 intents.typing = True
@@ -52,16 +62,68 @@ async def list(ctx):
 
 @bot.command()
 async def add(ctx, *, player_list):
+    """Add players to the player data file."""
     new_players = player_list.split(",")
     new_players = [player.strip() for player in new_players]
 
     players.clear()
     players.extend(new_players)
 
+    for player in new_players:
+        # Check if the player is already in the player data
+        existing_player = next(
+            (p for p in player_data if p['name'] == player), None)
+        if existing_player is None:
+            player_data.append({
+                'name': player,
+                'wins': 0,
+                'losses': 0
+            })
+
+    # Save the updated player data to the file
+    with open(PLAYER_DATA_FILE, 'w') as file:
+        json.dump(player_data, file)
+
     await ctx.send(f"Players added: {', '.join(new_players)}")
 
 
 @bot.command()
+async def leaderboard(ctx, page: int = 1):
+    # Leaderboard function will show the ranking, name, wins, losses, and win rat.
+    """Displays the leaderboard with player statistics."""
+    if not player_data:
+        await ctx.send('No players found. Use the `!add` command to add players.')
+        return
+
+    # Sort the players based on wins in descending order
+    player_data_sorted = sorted(player_data, key=lambda x: x.get('wins', 0), reverse=True)
+
+    items_per_page = 10
+    start_index = (page - 1) * items_per_page
+    end_index = start_index + items_per_page
+
+    rank_width = len(str(len(player_data_sorted))) + 6
+    name_width = max(len(player_stat["name"]) for player_stat in player_data_sorted[start_index:end_index]) + 7
+    wins_width = max(len(str(player_stat.get('wins', 0))) for player_stat in player_data_sorted[start_index:end_index]) + 6
+    losses_width = max(len(str(player_stat.get('losses', 0))) for player_stat in player_data_sorted[start_index:end_index]) + 6
+    win_rate_width = len("Win Rate") + 2
+
+    leaderboard_text = f'{"Rank":<{rank_width}}{"Name":<{name_width}}{"Wins":<{wins_width}}{"Loss":<{losses_width+3}}{"Win Rate":<{win_rate_width}}\n'
+    leaderboard_text += f'{"-" * rank_width}{"-" * name_width}{"-" * wins_width}{"-" * losses_width}{"-" * win_rate_width}\n'
+
+    for i, player_stat in enumerate(player_data_sorted[start_index:end_index], start=start_index+1):
+        name = player_stat["name"]
+        wins = player_stat.get('wins', 0)
+        losses = player_stat.get('losses', 0)
+        win_rate = (wins / (wins + losses)) * 100 if (wins + losses) > 0 else 0
+        leaderboard_text += f'{i:<{rank_width}}{" " * 2}{name:<{name_width}}{" " * 2}{wins:<{wins_width}}{" " * 2}{losses:<{losses_width}}{" " * 2}{win_rate:.0f}%\n'
+
+    await ctx.send(f'```\n{leaderboard_text}```')
+
+
+
+@bot.command()
+# Quick function to clear all current players in the array. Will not clear the players in the leaderboard.
 async def clearplayer(ctx):
     """Clears the player list."""
     players.clear()
@@ -69,6 +131,7 @@ async def clearplayer(ctx):
 
 
 @bot.command()
+# Roll Map function
 async def rollmap(ctx, game=None):
     """Rolls a random map for the specified game or remembers the game for rerolls."""
     maps = {
@@ -133,6 +196,7 @@ async def rollteam(ctx):
 
 
 @bot.event
+# Using discord reaction, when the user clicks on the discord reaction it will do a reroll.
 async def on_reaction_add(reaction, user):
     if user == bot.user:
         return
